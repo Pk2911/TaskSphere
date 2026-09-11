@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
 import {
   useMutation,
   useQuery,
@@ -11,6 +10,7 @@ import {
 import Button from "@/components/Button/Button";
 import Card from "@/components/Card/Card";
 import Modal from "@/components/Modal/Modal";
+import TaskForm from "@/components/TaskForm/TaskForm";
 
 import {
   assignTask,
@@ -20,11 +20,14 @@ import {
   getUsers,
   markTaskDone,
   updateTask,
+  uploadTaskAttachment,
   type Task,
   type TaskStatus,
   type UpdateTaskData,
   type User,
 } from "@/lib/taskApi";
+
+import type { TaskFormData } from "@tasksphere/shared";
 
 type StatusFilter = "ALL" | TaskStatus;
 
@@ -34,7 +37,8 @@ export default function TaskBoard() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<StatusFilter>("ALL");
-  const [assigneeFilter, setAssigneeFilter] = useState("ALL");
+  const [assigneeFilter, setAssigneeFilter] =
+    useState("ALL");
 
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -42,17 +46,17 @@ export default function TaskBoard() {
 
   const [isCreateModalOpen, setIsCreateModalOpen] =
     useState(false);
+
   const [isEditModalOpen, setIsEditModalOpen] =
     useState(false);
+
   const [isAssignModalOpen, setIsAssignModalOpen] =
     useState(false);
 
   const [selectedTask, setSelectedTask] =
     useState<Task | null>(null);
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [status, setStatus] =
+  const [editStatus, setEditStatus] =
     useState<TaskStatus>("TODO");
 
   const [selectedUserId, setSelectedUserId] =
@@ -80,7 +84,24 @@ export default function TaskBoard() {
   });
 
   const createTaskMutation = useMutation({
-    mutationFn: createTask,
+    mutationFn: async ({
+      data,
+      attachment,
+    }: {
+      data: TaskFormData;
+      attachment: File | null;
+    }) => {
+      const task = await createTask(data);
+
+      if (attachment) {
+        await uploadTaskAttachment(
+          task.id,
+          attachment,
+        );
+      }
+
+      return task;
+    },
 
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -88,19 +109,30 @@ export default function TaskBoard() {
       });
 
       setIsCreateModalOpen(false);
-      setTitle("");
-      setDescription("");
     },
   });
 
   const updateTaskMutation = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       taskId,
       data,
+      attachment,
     }: {
       taskId: number;
       data: UpdateTaskData;
-    }) => updateTask(taskId, data),
+      attachment: File | null;
+    }) => {
+      const task = await updateTask(taskId, data);
+
+      if (attachment) {
+        await uploadTaskAttachment(
+          task.id,
+          attachment,
+        );
+      }
+
+      return task;
+    },
 
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -201,7 +233,9 @@ export default function TaskBoard() {
     return tasks.filter((task) => {
       const matchesSearch =
         !searchTerm ||
-        task.title.toLowerCase().includes(searchTerm);
+        task.title
+          .toLowerCase()
+          .includes(searchTerm);
 
       const matchesStatus =
         statusFilter === "ALL" ||
@@ -234,10 +268,10 @@ export default function TaskBoard() {
   );
 
   useEffect(() => {
-  if (currentPage > totalPages) {
-    setCurrentPage(totalPages);
-  }
-}, [currentPage, totalPages]);
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const paginatedTasks = useMemo(() => {
     const startIndex =
@@ -286,57 +320,52 @@ export default function TaskBoard() {
   };
 
   const openCreateModal = () => {
-    setTitle("");
-    setDescription("");
-    setStatus("TODO");
     setIsCreateModalOpen(true);
   };
 
   const openEditModal = (task: Task) => {
     setSelectedTask(task);
-    setTitle(task.title);
-    setDescription(task.description);
-    setStatus(task.status);
+    setEditStatus(task.status);
     setIsEditModalOpen(true);
   };
 
   const openAssignModal = (task: Task) => {
     setSelectedTask(task);
+
     setSelectedUserId(
       task.userId !== null
         ? String(task.userId)
         : "",
     );
+
     setIsAssignModalOpen(true);
   };
 
-  const handleCreateTask = () => {
-    if (!title.trim() || !description.trim()) {
-      return;
-    }
-
-    createTaskMutation.mutate({
-      title: title.trim(),
-      description: description.trim(),
+  const handleCreateTask = async (
+    data: TaskFormData,
+    attachment: File | null,
+  ) => {
+    await createTaskMutation.mutateAsync({
+      data,
+      attachment,
     });
   };
 
-  const handleUpdateTask = () => {
+  const handleUpdateTask = async (
+    data: TaskFormData,
+    attachment: File | null,
+  ) => {
     if (!selectedTask) {
       return;
     }
 
-    if (!title.trim() || !description.trim()) {
-      return;
-    }
-
-    updateTaskMutation.mutate({
+    await updateTaskMutation.mutateAsync({
       taskId: selectedTask.id,
       data: {
-        title: title.trim(),
-        description: description.trim(),
-        status,
+        ...data,
+        status: editStatus,
       },
+      attachment,
     });
   };
 
@@ -351,7 +380,9 @@ export default function TaskBoard() {
     });
   };
 
-  const handleDeleteTask = (taskId: number) => {
+  const handleDeleteTask = (
+    taskId: number,
+  ) => {
     const confirmed = window.confirm(
       "Are you sure you want to delete this task?",
     );
@@ -458,11 +489,15 @@ export default function TaskBoard() {
               <option value="ALL">
                 All statuses
               </option>
-              <option value="TODO">TODO</option>
+              <option value="TODO">
+                TODO
+              </option>
               <option value="IN_PROGRESS">
                 IN PROGRESS
               </option>
-              <option value="DONE">DONE</option>
+              <option value="DONE">
+                DONE
+              </option>
             </select>
           </div>
 
@@ -548,6 +583,19 @@ export default function TaskBoard() {
                         `User ${task.userId}`
                       : "Unassigned"}
                   </div>
+
+                  <div className="mt-3 text-xs text-gray-500">
+                    Priority: {task.priority}
+                  </div>
+
+                  {task.dueDate && (
+                    <div className="mt-1 text-xs text-gray-500">
+                      Due:{" "}
+                      {new Date(
+                        task.dueDate,
+                      ).toLocaleString()}
+                    </div>
+                  )}
 
                   {failedMarkDoneTaskId ===
                     task.id && (
@@ -644,6 +692,7 @@ export default function TaskBoard() {
         )}
       </Card>
 
+      {/* CREATE TASK */}
       <Modal
         isOpen={isCreateModalOpen}
         onClose={() =>
@@ -651,59 +700,26 @@ export default function TaskBoard() {
         }
         title="Create Task"
       >
-        <div className="space-y-4">
-          <div>
-            <label
-              htmlFor="create-title"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Title
-            </label>
+        <TaskForm
+          users={users ?? []}
+          onSubmit={handleCreateTask}
+          isSubmitting={
+            createTaskMutation.isPending
+          }
+        />
 
-            <input
-              id="create-title"
-              value={title}
-              onChange={(event) =>
-                setTitle(event.target.value)
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="create-description"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Description
-            </label>
-
-            <textarea
-              id="create-description"
-              value={description}
-              onChange={(event) =>
-                setDescription(event.target.value)
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
-              rows={4}
-            />
-          </div>
-
-          {createTaskMutation.isError && (
-            <p className="text-sm text-red-600">
-              Failed to create task.
-            </p>
-          )}
-
-          <Button
-            onClick={handleCreateTask}
-            loading={createTaskMutation.isPending}
+        {createTaskMutation.isError && (
+          <p
+            className="mt-4 text-sm text-red-600"
+            role="alert"
           >
-            Create
-          </Button>
-        </div>
+            Failed to create task. Please try
+            again.
+          </p>
+        )}
       </Modal>
 
+      {/* EDIT TASK */}
       <Modal
         isOpen={isEditModalOpen}
         onClose={() => {
@@ -712,85 +728,79 @@ export default function TaskBoard() {
         }}
         title="Edit Task"
       >
-        <div className="space-y-4">
-          <div>
-            <label
-              htmlFor="edit-title"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Title
-            </label>
+        {selectedTask && (
+          <>
+            <div className="mb-6">
+              <label
+                htmlFor="edit-status"
+                className="mb-2 block text-sm font-medium text-gray-700"
+              >
+                Status
+              </label>
 
-            <input
-              id="edit-title"
-              value={title}
-              onChange={(event) =>
-                setTitle(event.target.value)
+              <select
+                id="edit-status"
+                value={editStatus}
+                onChange={(event) =>
+                  setEditStatus(
+                    event.target.value as TaskStatus,
+                  )
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:border-blue-500"
+              >
+                <option value="TODO">
+                  TODO
+                </option>
+
+                <option value="IN_PROGRESS">
+                  IN PROGRESS
+                </option>
+
+                <option value="DONE">
+                  DONE
+                </option>
+              </select>
+            </div>
+
+            <TaskForm
+              users={users ?? []}
+              isEditing
+              initialData={{
+                title: selectedTask.title,
+                description:
+                  selectedTask.description,
+                userId:
+                  selectedTask.userId ??
+                  undefined,
+                dueDate:
+                  selectedTask.dueDate ??
+                  undefined,
+                priority:
+                  selectedTask.priority,
+                projectId:
+                  selectedTask.projectId ??
+                  undefined,
+              }}
+              onSubmit={handleUpdateTask}
+              isSubmitting={
+                updateTaskMutation.isPending
               }
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
             />
-          </div>
 
-          <div>
-            <label
-              htmlFor="edit-description"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Description
-            </label>
-
-            <textarea
-              id="edit-description"
-              value={description}
-              onChange={(event) =>
-                setDescription(event.target.value)
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
-              rows={4}
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="edit-status"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Status
-            </label>
-
-            <select
-              id="edit-status"
-              value={status}
-              onChange={(event) =>
-                setStatus(
-                  event.target.value as TaskStatus,
-                )
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
-            >
-              <option value="TODO">TODO</option>
-              <option value="IN_PROGRESS">
-                IN PROGRESS
-              </option>
-              <option value="DONE">DONE</option>
-            </select>
-          </div>
-
-          {updateTaskMutation.isError && (
-            <p className="text-sm text-red-600">
-              Failed to update task.
-            </p>
-          )}
-
-          <Button
-            onClick={handleUpdateTask}
-            loading={updateTaskMutation.isPending}
-          >
-            Save Changes
-          </Button>
-        </div>
+            {updateTaskMutation.isError && (
+              <p
+                className="mt-4 text-sm text-red-600"
+                role="alert"
+              >
+                Failed to update task. Please try
+                again.
+              </p>
+            )}
+          </>
+        )}
       </Modal>
 
+      {/* ASSIGN TASK */}
       <Modal
         isOpen={isAssignModalOpen}
         onClose={() => {
@@ -812,7 +822,9 @@ export default function TaskBoard() {
               id="assign-user"
               value={selectedUserId}
               onChange={(event) =>
-                setSelectedUserId(event.target.value)
+                setSelectedUserId(
+                  event.target.value,
+                )
               }
               disabled={usersLoading}
               className="w-full rounded-md border border-gray-300 px-3 py-2"
@@ -833,14 +845,19 @@ export default function TaskBoard() {
           </div>
 
           {assignTaskMutation.isError && (
-            <p className="text-sm text-red-600">
+            <p
+              className="text-sm text-red-600"
+              role="alert"
+            >
               Failed to assign task.
             </p>
           )}
 
           <Button
             onClick={handleAssignTask}
-            loading={assignTaskMutation.isPending}
+            loading={
+              assignTaskMutation.isPending
+            }
           >
             Assign
           </Button>
