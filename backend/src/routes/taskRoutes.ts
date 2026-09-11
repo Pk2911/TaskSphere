@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import { uploadTaskAttachmentController } from "../controllers/taskAttachmentController.js";
 
 import {
   getTasks,
@@ -20,6 +21,7 @@ import {
 } from "../schemas/taskSchema.js";
 
 import { validate } from "../middleware/validate.js";
+import { uploadTaskAttachment } from "../middleware/uploadMiddleware.js";
 
 const router = Router();
 
@@ -63,6 +65,13 @@ router.patch(
   "/tasks/:id/done",
   authenticateToken,
   moveTaskToDoneController,
+);
+
+router.post(
+  "/tasks/:id/attachments",
+  authenticateToken,
+  uploadTaskAttachment.single("file"),
+  uploadTaskAttachmentController,
 );
 
 export default router;

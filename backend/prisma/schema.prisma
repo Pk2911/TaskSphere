@@ -18,6 +18,12 @@ enum TaskStatus {
   DONE
 }
 
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model User {
   id            Int            @id @default(autoincrement())
   email         String         @unique
@@ -47,24 +53,41 @@ model Project {
 }
 
 model Task {
-  id          Int        @id @default(autoincrement())
+  id          Int          @id @default(autoincrement())
   title       String
   description String
-  status      TaskStatus @default(TODO)
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
   dueDate     DateTime?
   userId      Int?
   projectId   Int?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
-  user        User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project     Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   comments    TaskComment[]
   auditLogs   AuditLog[]
+  attachments TaskAttachment[]
 
   @@index([projectId, status])
   @@index([userId])
+}
+
+model TaskAttachment {
+  id         Int      @id @default(autoincrement())
+  fileName   String
+  storedName String
+  mimeType   String
+  size       Int
+  path       String
+  taskId     Int
+  createdAt  DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
 }
 
 model TaskComment {
