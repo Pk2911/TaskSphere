@@ -12,13 +12,19 @@ import {
 
 import { AppError } from "../middleware/errorHandler.js";
 
-export async function getTasks(req: Request, res: Response) {
+export async function getTasks(
+  req: Request,
+  res: Response,
+) {
   const tasks = await listTasks();
 
   res.json(tasks);
 }
 
-export async function getTask(req: Request, res: Response) {
+export async function getTask(
+  req: Request,
+  res: Response,
+) {
   const id = Number(req.params.id);
 
   const task = await findTask(id);
@@ -30,20 +36,35 @@ export async function getTask(req: Request, res: Response) {
   res.json(task);
 }
 
-export async function createTask(req: Request, res: Response) {
-  const { title, description, dueDate, projectId } = req.body;
+export async function createTask(
+  req: Request,
+  res: Response,
+) {
+  const {
+    title,
+    description,
+    dueDate,
+    priority,
+    userId,
+    projectId,
+  } = req.body;
 
   const task = await addTask(
     title,
     description,
     dueDate,
+    priority,
+    userId,
     projectId,
   );
 
   res.status(201).json(task);
 }
 
-export async function updateTask(req: Request, res: Response) {
+export async function updateTask(
+  req: Request,
+  res: Response,
+) {
   const id = Number(req.params.id);
 
   const task = await editTask(id, req.body);
@@ -55,7 +76,10 @@ export async function updateTask(req: Request, res: Response) {
   res.json(task);
 }
 
-export async function deleteTask(req: Request, res: Response) {
+export async function deleteTask(
+  req: Request,
+  res: Response,
+) {
   const id = Number(req.params.id);
 
   try {

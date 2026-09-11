@@ -1,48 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import Button from "@/components/Button/Button";
 import Card from "@/components/Card/Card";
 import Modal from "@/components/Modal/Modal";
 import TaskForm from "@/components/TaskForm/TaskForm";
+import ProjectForm from "@/components/ProjectForm/ProjectForm";
 
 import {
   assignTask,
+  createProject,
   createTask,
   deleteTask,
+  getProjects,
   getTasks,
   getUsers,
   markTaskDone,
   updateTask,
   uploadTaskAttachment,
+  type Project,
   type Task,
+  type TaskPriority,
   type TaskStatus,
-  type UpdateTaskData,
-  type User,
 } from "@/lib/taskApi";
 
-import type { TaskFormData } from "@tasksphere/shared";
-
-type StatusFilter = "ALL" | TaskStatus;
+const TASKS_PER_PAGE = 5;
 
 export default function TaskBoard() {
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
-    useState<StatusFilter>("ALL");
+    useState<"ALL" | TaskStatus>("ALL");
   const [assigneeFilter, setAssigneeFilter] =
-    useState("ALL");
+    useState<number | "ALL">("ALL");
 
   const [currentPage, setCurrentPage] = useState(1);
-
-  const tasksPerPage = 5;
 
   const [isCreateModalOpen, setIsCreateModalOpen] =
     useState(false);
@@ -53,34 +48,39 @@ export default function TaskBoard() {
   const [isAssignModalOpen, setIsAssignModalOpen] =
     useState(false);
 
+  const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] =
+    useState(false);
+
   const [selectedTask, setSelectedTask] =
     useState<Task | null>(null);
 
-  const [editStatus, setEditStatus] =
-    useState<TaskStatus>("TODO");
+  const [selectedProject, setSelectedProject] =
+    useState<Project | null>(null);
 
-  const [selectedUserId, setSelectedUserId] =
-    useState("");
-
-  const [failedMarkDoneTaskId, setFailedMarkDoneTaskId] =
-    useState<number | null>(null);
+  const [error, setError] = useState("");
 
   const {
-    data: tasks,
-    isPending: tasksLoading,
-    isError: tasksError,
-    error: taskError,
-  } = useQuery<Task[], Error>({
+    data: tasks = [],
+    isLoading: tasksLoading,
+  } = useQuery({
     queryKey: ["tasks"],
     queryFn: getTasks,
   });
 
   const {
-    data: users,
-    isPending: usersLoading,
-  } = useQuery<User[], Error>({
+    data: users = [],
+    isLoading: usersLoading,
+  } = useQuery({
     queryKey: ["users"],
     queryFn: getUsers,
+  });
+
+  const {
+    data: projects = [],
+    isLoading: projectsLoading,
+  } = useQuery({
+    queryKey: ["projects"],
+    queryFn: getProjects,
   });
 
   const createTaskMutation = useMutation({
@@ -88,7 +88,14 @@ export default function TaskBoard() {
       data,
       attachment,
     }: {
-      data: TaskFormData;
+      data: {
+        title: string;
+        description: string;
+        dueDate?: string;
+        priority?: TaskPriority;
+        userId?: number;
+        projectId?: number;
+      };
       attachment: File | null;
     }) => {
       const task = await createTask(data);
@@ -109,6 +116,11 @@ export default function TaskBoard() {
       });
 
       setIsCreateModalOpen(false);
+      setError("");
+    },
+
+    onError: (err: Error) => {
+      setError(err.message);
     },
   });
 
@@ -119,7 +131,15 @@ export default function TaskBoard() {
       attachment,
     }: {
       taskId: number;
-      data: UpdateTaskData;
+      data: {
+        title?: string;
+        description?: string;
+        status?: TaskStatus;
+        dueDate?: string;
+        priority?: TaskPriority;
+        userId?: number;
+        projectId?: number;
+      };
       attachment: File | null;
     }) => {
       const task = await updateTask(taskId, data);
@@ -141,6 +161,38 @@ export default function TaskBoard() {
 
       setIsEditModalOpen(false);
       setSelectedTask(null);
+      setError("");
+    },
+
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+  });
+
+  const createProjectMutation = useMutation({
+    mutationFn: ({
+      name,
+      description,
+    }: {
+      name: string;
+      description: string;
+    }) =>
+      createProject({
+        name,
+        description: description || undefined,
+      }),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+      });
+
+      setIsCreateProjectModalOpen(false);
+      setError("");
+    },
+
+    onError: (err: Error) => {
+      setError(err.message);
     },
   });
 
@@ -160,7 +212,11 @@ export default function TaskBoard() {
 
       setIsAssignModalOpen(false);
       setSelectedTask(null);
-      setSelectedUserId("");
+      setError("");
+    },
+
+    onError: (err: Error) => {
+      setError(err.message);
     },
   });
 
@@ -171,6 +227,12 @@ export default function TaskBoard() {
       queryClient.invalidateQueries({
         queryKey: ["tasks"],
       });
+
+      setError("");
+    },
+
+    onError: (err: Error) => {
+      setError(err.message);
     },
   });
 
@@ -178,19 +240,19 @@ export default function TaskBoard() {
     mutationFn: markTaskDone,
 
     onMutate: async (taskId) => {
-      setFailedMarkDoneTaskId(null);
-
       await queryClient.cancelQueries({
         queryKey: ["tasks"],
       });
 
       const previousTasks =
-        queryClient.getQueryData<Task[]>(["tasks"]);
+        queryClient.getQueryData<Task[]>([
+          "tasks",
+        ]);
 
       queryClient.setQueryData<Task[]>(
         ["tasks"],
-        (currentTasks) =>
-          currentTasks?.map((task) =>
+        (old = []) =>
+          old.map((task) =>
             task.id === taskId
               ? {
                   ...task,
@@ -200,12 +262,10 @@ export default function TaskBoard() {
           ),
       );
 
-      return {
-        previousTasks,
-      };
+      return { previousTasks };
     },
 
-    onError: (_error, taskId, context) => {
+    onError: (_error, _taskId, context) => {
       if (context?.previousTasks) {
         queryClient.setQueryData(
           ["tasks"],
@@ -213,7 +273,7 @@ export default function TaskBoard() {
         );
       }
 
-      setFailedMarkDoneTaskId(taskId);
+      setError("Failed to mark task as done.");
     },
 
     onSettled: () => {
@@ -224,18 +284,18 @@ export default function TaskBoard() {
   });
 
   const filteredTasks = useMemo(() => {
-    if (!tasks) {
-      return [];
-    }
-
-    const searchTerm = search.trim().toLowerCase();
+    const normalizedSearch =
+      search.trim().toLowerCase();
 
     return tasks.filter((task) => {
       const matchesSearch =
-        !searchTerm ||
+        !normalizedSearch ||
         task.title
           .toLowerCase()
-          .includes(searchTerm);
+          .includes(normalizedSearch) ||
+        task.description
+          .toLowerCase()
+          .includes(normalizedSearch);
 
       const matchesStatus =
         statusFilter === "ALL" ||
@@ -243,9 +303,7 @@ export default function TaskBoard() {
 
       const matchesAssignee =
         assigneeFilter === "ALL" ||
-        (assigneeFilter === "UNASSIGNED"
-          ? task.userId === null
-          : task.userId === Number(assigneeFilter));
+        task.userId === assigneeFilter;
 
       return (
         matchesSearch &&
@@ -263,436 +321,367 @@ export default function TaskBoard() {
   const totalPages = Math.max(
     1,
     Math.ceil(
-      filteredTasks.length / tasksPerPage,
+      filteredTasks.length / TASKS_PER_PAGE,
     ),
   );
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
+  const paginatedTasks = filteredTasks.slice(
+    (currentPage - 1) * TASKS_PER_PAGE,
+    currentPage * TASKS_PER_PAGE,
+  );
+
+  const getUserEmail = (userId: number | null) => {
+    if (!userId) {
+      return "Unassigned";
     }
-  }, [currentPage, totalPages]);
 
-  const paginatedTasks = useMemo(() => {
-    const startIndex =
-      (currentPage - 1) * tasksPerPage;
-
-    const endIndex =
-      startIndex + tasksPerPage;
-
-    return filteredTasks.slice(
-      startIndex,
-      endIndex,
+    return (
+      users.find((user) => user.id === userId)
+        ?.email ?? "Unknown user"
     );
-  }, [filteredTasks, currentPage]);
+  };
 
-  const handleSearchChange = (
-    value: string,
+  const getProjectName = (
+    projectId: number | null,
   ) => {
-    setSearch(value);
-    setCurrentPage(1);
-  };
+    if (!projectId) {
+      return "No project";
+    }
 
-  const handleStatusFilterChange = (
-    value: StatusFilter,
-  ) => {
-    setStatusFilter(value);
-    setCurrentPage(1);
-  };
-
-  const handleAssigneeFilterChange = (
-    value: string,
-  ) => {
-    setAssigneeFilter(value);
-    setCurrentPage(1);
-  };
-
-  const handlePreviousPage = () => {
-    setCurrentPage((page) =>
-      Math.max(1, page - 1),
+    return (
+      projects.find(
+        (project) => project.id === projectId,
+      )?.name ?? `Project #${projectId}`
     );
   };
 
-  const handleNextPage = () => {
-    setCurrentPage((page) =>
-      Math.min(totalPages, page + 1),
-    );
-  };
-
-  const openCreateModal = () => {
-    setIsCreateModalOpen(true);
-  };
-
-  const openEditModal = (task: Task) => {
-    setSelectedTask(task);
-    setEditStatus(task.status);
-    setIsEditModalOpen(true);
-  };
-
-  const openAssignModal = (task: Task) => {
-    setSelectedTask(task);
-
-    setSelectedUserId(
-      task.userId !== null
-        ? String(task.userId)
-        : "",
-    );
-
-    setIsAssignModalOpen(true);
-  };
-
-  const handleCreateTask = async (
-    data: TaskFormData,
+  const handleCreateTask = (
+    data: Parameters<
+      NonNullable<
+        React.ComponentProps<typeof TaskForm>["onSubmit"]
+      >
+    >[0],
     attachment: File | null,
   ) => {
-    await createTaskMutation.mutateAsync({
+    createTaskMutation.mutate({
       data,
       attachment,
     });
   };
 
-  const handleUpdateTask = async (
-    data: TaskFormData,
+  const handleUpdateTask = (
+    data: Parameters<
+      NonNullable<
+        React.ComponentProps<typeof TaskForm>["onSubmit"]
+      >
+    >[0],
     attachment: File | null,
   ) => {
     if (!selectedTask) {
       return;
     }
 
-    await updateTaskMutation.mutateAsync({
+    updateTaskMutation.mutate({
       taskId: selectedTask.id,
-      data: {
-        ...data,
-        status: editStatus,
-      },
+      data,
       attachment,
     });
   };
 
-  const handleAssignTask = () => {
-    if (!selectedTask || !selectedUserId) {
-      return;
-    }
-
-    assignTaskMutation.mutate({
-      taskId: selectedTask.id,
-      userId: Number(selectedUserId),
-    });
+  const openEditModal = (task: Task) => {
+    setSelectedTask(task);
+    setError("");
+    setIsEditModalOpen(true);
   };
 
-  const handleDeleteTask = (
-    taskId: number,
-  ) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this task?",
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    deleteTaskMutation.mutate(taskId);
+  const openAssignModal = (task: Task) => {
+    setSelectedTask(task);
+    setError("");
+    setIsAssignModalOpen(true);
   };
 
-  const handleMarkDone = (taskId: number) => {
-    markDoneMutation.mutate(taskId);
-  };
-
-  if (tasksLoading) {
+  if (
+    tasksLoading ||
+    usersLoading ||
+    projectsLoading
+  ) {
     return (
-      <Card>
-        <p className="text-sm text-gray-500">
-          Loading tasks...
-        </p>
-      </Card>
-    );
-  }
-
-  if (tasksError) {
-    return (
-      <Card>
-        <p className="text-sm font-medium text-red-600">
-          Failed to load tasks.
-        </p>
-
-        <p className="mt-1 text-sm text-gray-500">
-          {taskError.message}
-        </p>
-      </Card>
+      <main className="p-6">
+        <p>Loading...</p>
+      </main>
     );
   }
 
   return (
-    <>
-      <Card>
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Tasks
-            </h2>
+    <main className="space-y-6 p-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Task Board
+          </h1>
 
-            <p className="mt-1 text-sm text-gray-500">
-              Showing {paginatedTasks.length} of{" "}
-              {filteredTasks.length} task
-              {filteredTasks.length === 1
-                ? ""
-                : "s"}
-            </p>
-          </div>
+          <p className="text-sm text-gray-600">
+            Manage your tasks and projects.
+          </p>
+        </div>
 
-          <Button onClick={openCreateModal}>
+        <div className="flex gap-3">
+          <Button
+            type="button"
+            onClick={() => {
+              setError("");
+              setIsCreateProjectModalOpen(true);
+            }}
+          >
+            Create Project
+          </Button>
+
+          <Button
+            type="button"
+            onClick={() => {
+              setError("");
+              setIsCreateModalOpen(true);
+            }}
+          >
             Create Task
           </Button>
         </div>
+      </div>
 
-        <div className="mb-6 grid gap-4 md:grid-cols-3">
-          <div>
-            <label
-              htmlFor="task-search"
-              className="mb-2 block text-sm font-medium text-gray-700"
+      {error && (
+        <p
+          role="alert"
+          className="rounded-md bg-red-50 p-3 text-sm text-red-700"
+        >
+          {error}
+        </p>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setCurrentPage(1);
+          }}
+          placeholder="Search tasks..."
+          aria-label="Search tasks"
+          className="rounded-md border border-gray-300 px-3 py-2 text-gray-900"
+        />
+
+        <select
+          value={statusFilter}
+          onChange={(event) => {
+            setStatusFilter(
+              event.target.value as
+                | "ALL"
+                | TaskStatus,
+            );
+            setCurrentPage(1);
+          }}
+          aria-label="Filter by status"
+          className="rounded-md border border-gray-300 px-3 py-2 text-gray-900"
+        >
+          <option value="ALL">All statuses</option>
+          <option value="TODO">To Do</option>
+          <option value="IN_PROGRESS">
+            In Progress
+          </option>
+          <option value="DONE">Done</option>
+        </select>
+
+        <select
+          value={assigneeFilter}
+          onChange={(event) => {
+            const value = event.target.value;
+
+            setAssigneeFilter(
+              value === "ALL"
+                ? "ALL"
+                : Number(value),
+            );
+
+            setCurrentPage(1);
+          }}
+          aria-label="Filter by assignee"
+          className="rounded-md border border-gray-300 px-3 py-2 text-gray-900"
+        >
+          <option value="ALL">
+            All assignees
+          </option>
+
+          {users.map((user) => (
+            <option
+              key={user.id}
+              value={user.id}
             >
-              Search tasks
-            </label>
+              {user.email}
+            </option>
+          ))}
+        </select>
+      </div>
 
-            <input
-              id="task-search"
-              type="search"
-              value={search}
-              onChange={(event) =>
-                handleSearchChange(
-                  event.target.value,
-                )
-              }
-              placeholder="Search by title..."
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:border-blue-500"
-            />
+      {projects.length > 0 && (
+        <Card>
+          <h2 className="mb-3 text-lg font-semibold text-gray-900">
+            Projects
+          </h2>
+
+          <div className="flex flex-wrap gap-2">
+            {projects.map((project) => (
+              <span
+                key={project.id}
+                className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-700"
+              >
+                {project.name}
+              </span>
+            ))}
           </div>
+        </Card>
+      )}
 
-          <div>
-            <label
-              htmlFor="status-filter"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Status
-            </label>
-
-            <select
-              id="status-filter"
-              value={statusFilter}
-              onChange={(event) =>
-                handleStatusFilterChange(
-                  event.target.value as StatusFilter,
-                )
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:border-blue-500"
-            >
-              <option value="ALL">
-                All statuses
-              </option>
-              <option value="TODO">
-                TODO
-              </option>
-              <option value="IN_PROGRESS">
-                IN PROGRESS
-              </option>
-              <option value="DONE">
-                DONE
-              </option>
-            </select>
-          </div>
-
-          <div>
-            <label
-              htmlFor="assignee-filter"
-              className="mb-2 block text-sm font-medium text-gray-700"
-            >
-              Assignee
-            </label>
-
-            <select
-              id="assignee-filter"
-              value={assigneeFilter}
-              onChange={(event) =>
-                handleAssigneeFilterChange(
-                  event.target.value,
-                )
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:border-blue-500"
-            >
-              <option value="ALL">
-                All assignees
-              </option>
-
-              <option value="UNASSIGNED">
-                Unassigned
-              </option>
-
-              {users?.map((user) => (
-                <option
-                  key={user.id}
-                  value={user.id}
-                >
-                  {user.email}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {filteredTasks.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center">
-            <p className="text-sm font-medium text-gray-700">
-              No tasks found
+      <div className="grid gap-4">
+        {paginatedTasks.length === 0 ? (
+          <Card>
+            <p className="text-gray-600">
+              No tasks found.
             </p>
-
-            <p className="mt-1 text-sm text-gray-500">
-              Try changing your search or filters.
-            </p>
-          </div>
+          </Card>
         ) : (
-          <>
-            <div className="space-y-3">
-              {paginatedTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="rounded-lg border border-gray-200 p-4"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="font-medium text-gray-900">
-                        {task.title}
-                      </h3>
+          paginatedTasks.map((task) => (
+            <Card key={task.id}>
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    {task.title}
+                  </h2>
 
-                      <p className="mt-1 text-sm text-gray-500">
-                        {task.description}
-                      </p>
-                    </div>
+                  <p className="text-gray-600">
+                    {task.description}
+                  </p>
 
-                    <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    <span className="rounded bg-gray-100 px-2 py-1">
                       {task.status}
                     </span>
-                  </div>
 
-                  <div className="mt-3 text-xs text-gray-500">
-                    Assignee:{" "}
-                    {task.userId !== null
-                      ? users?.find(
-                          (user) =>
-                            user.id === task.userId,
-                        )?.email ??
-                        `User ${task.userId}`
-                      : "Unassigned"}
-                  </div>
+                    <span className="rounded bg-gray-100 px-2 py-1">
+                      Priority: {task.priority}
+                    </span>
 
-                  <div className="mt-3 text-xs text-gray-500">
-                    Priority: {task.priority}
-                  </div>
+                    <span className="rounded bg-gray-100 px-2 py-1">
+                      Assignee:{" "}
+                      {getUserEmail(task.userId)}
+                    </span>
 
-                  {task.dueDate && (
-                    <div className="mt-1 text-xs text-gray-500">
-                      Due:{" "}
-                      {new Date(
-                        task.dueDate,
-                      ).toLocaleString()}
-                    </div>
-                  )}
+                    <span className="rounded bg-gray-100 px-2 py-1">
+                      Project:{" "}
+                      {getProjectName(
+                        task.projectId,
+                      )}
+                    </span>
 
-                  {failedMarkDoneTaskId ===
-                    task.id && (
-                    <p className="mt-3 text-sm text-red-600">
-                      Failed to mark task as done.
-                      Please try again.
-                    </p>
-                  )}
-
-                  {deleteTaskMutation.isError &&
-                    deleteTaskMutation.variables ===
-                      task.id && (
-                      <p className="mt-3 text-sm text-red-600">
-                        Failed to delete task.
-                      </p>
+                    {task.dueDate && (
+                      <span className="rounded bg-gray-100 px-2 py-1">
+                        Due:{" "}
+                        {new Date(
+                          task.dueDate,
+                        ).toLocaleDateString()}
+                      </span>
                     )}
+                  </div>
+                </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {task.status !== "DONE" && (
                     <Button
-                      variant="secondary"
+                      type="button"
                       onClick={() =>
-                        openEditModal(task)
-                      }
-                    >
-                      Edit
-                    </Button>
-
-                    <Button
-                      variant="secondary"
-                      onClick={() =>
-                        openAssignModal(task)
-                      }
-                    >
-                      Assign
-                    </Button>
-
-                    {task.status !== "DONE" && (
-                      <Button
-                        onClick={() =>
-                          handleMarkDone(task.id)
-                        }
-                        loading={
-                          markDoneMutation.isPending &&
-                          markDoneMutation.variables ===
-                            task.id
-                        }
-                      >
-                        Mark Done
-                      </Button>
-                    )}
-
-                    <Button
-                      variant="danger"
-                      onClick={() =>
-                        handleDeleteTask(task.id)
+                        markDoneMutation.mutate(
+                          task.id,
+                        )
                       }
                       loading={
-                        deleteTaskMutation.isPending &&
-                        deleteTaskMutation.variables ===
+                        markDoneMutation.isPending &&
+                        markDoneMutation.variables ===
                           task.id
                       }
                     >
-                      Delete
+                      Mark Done
                     </Button>
-                  </div>
+                  )}
+
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      openEditModal(task)
+                    }
+                  >
+                    Edit
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      openAssignModal(task)
+                    }
+                  >
+                    Assign
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      deleteTaskMutation.mutate(
+                        task.id,
+                      )
+                    }
+                    loading={
+                      deleteTaskMutation.isPending &&
+                      deleteTaskMutation.variables ===
+                        task.id
+                    }
+                  >
+                    Delete
+                  </Button>
                 </div>
-              ))}
-            </div>
-
-            <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4">
-              <Button
-                variant="secondary"
-                onClick={handlePreviousPage}
-                disabled={currentPage === 1}
-              >
-                ← Previous
-              </Button>
-
-              <span className="text-sm text-gray-600">
-                Page {currentPage} of {totalPages}
-              </span>
-
-              <Button
-                variant="secondary"
-                onClick={handleNextPage}
-                disabled={
-                  currentPage === totalPages
-                }
-              >
-                Next →
-              </Button>
-            </div>
-          </>
+              </div>
+            </Card>
+          ))
         )}
-      </Card>
+      </div>
 
-      {/* CREATE TASK */}
+      <div className="flex items-center justify-center gap-4">
+        <Button
+          type="button"
+          disabled={currentPage === 1}
+          onClick={() =>
+            setCurrentPage((page) =>
+              Math.max(1, page - 1),
+            )
+          }
+        >
+          Previous
+        </Button>
+
+        <span className="text-sm text-gray-600">
+          Page {currentPage} of {totalPages}
+        </span>
+
+        <Button
+          type="button"
+          disabled={currentPage === totalPages}
+          onClick={() =>
+            setCurrentPage((page) =>
+              Math.min(totalPages, page + 1),
+            )
+          }
+        >
+          Next
+        </Button>
+      </div>
+
       <Modal
         isOpen={isCreateModalOpen}
         onClose={() =>
@@ -701,25 +690,15 @@ export default function TaskBoard() {
         title="Create Task"
       >
         <TaskForm
-          users={users ?? []}
+          users={users}
+          projects={projects}
           onSubmit={handleCreateTask}
           isSubmitting={
             createTaskMutation.isPending
           }
         />
-
-        {createTaskMutation.isError && (
-          <p
-            className="mt-4 text-sm text-red-600"
-            role="alert"
-          >
-            Failed to create task. Please try
-            again.
-          </p>
-        )}
       </Modal>
 
-      {/* EDIT TASK */}
       <Modal
         isOpen={isEditModalOpen}
         onClose={() => {
@@ -729,78 +708,66 @@ export default function TaskBoard() {
         title="Edit Task"
       >
         {selectedTask && (
-          <>
-            <div className="mb-6">
+          <div className="space-y-5">
+            <div>
               <label
-                htmlFor="edit-status"
+                htmlFor="edit-task-status"
                 className="mb-2 block text-sm font-medium text-gray-700"
               >
                 Status
               </label>
 
               <select
-                id="edit-status"
-                value={editStatus}
-                onChange={(event) =>
-                  setEditStatus(
-                    event.target.value as TaskStatus,
-                  )
-                }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus:border-blue-500"
+                id="edit-task-status"
+                defaultValue={selectedTask.status}
+                onChange={(event) => {
+                  setSelectedTask({
+                    ...selectedTask,
+                    status:
+                      event.target.value as TaskStatus,
+                  });
+                }}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900"
               >
                 <option value="TODO">
-                  TODO
+                  To Do
                 </option>
-
                 <option value="IN_PROGRESS">
-                  IN PROGRESS
+                  In Progress
                 </option>
-
                 <option value="DONE">
-                  DONE
+                  Done
                 </option>
               </select>
             </div>
 
             <TaskForm
-              users={users ?? []}
-              isEditing
+              users={users}
+              projects={projects}
               initialData={{
                 title: selectedTask.title,
                 description:
                   selectedTask.description,
-                userId:
-                  selectedTask.userId ??
-                  undefined,
                 dueDate:
-                  selectedTask.dueDate ??
-                  undefined,
+                  selectedTask.dueDate ?? undefined,
                 priority:
                   selectedTask.priority,
+                userId:
+                  selectedTask.userId ?? undefined,
                 projectId:
                   selectedTask.projectId ??
                   undefined,
               }}
+              isEditing
               onSubmit={handleUpdateTask}
               isSubmitting={
                 updateTaskMutation.isPending
               }
             />
-
-            {updateTaskMutation.isError && (
-              <p
-                className="mt-4 text-sm text-red-600"
-                role="alert"
-              >
-                Failed to update task. Please try
-                again.
-              </p>
-            )}
-          </>
+          </div>
         )}
       </Modal>
 
-      {/* ASSIGN TASK */}
       <Modal
         isOpen={isAssignModalOpen}
         onClose={() => {
@@ -809,31 +776,42 @@ export default function TaskBoard() {
         }}
         title="Assign Task"
       >
-        <div className="space-y-4">
-          <div>
+        {selectedTask && (
+          <div className="space-y-4">
             <label
               htmlFor="assign-user"
-              className="mb-2 block text-sm font-medium text-gray-700"
+              className="block text-sm font-medium text-gray-700"
             >
-              User
+              Assignee
             </label>
 
             <select
               id="assign-user"
-              value={selectedUserId}
-              onChange={(event) =>
-                setSelectedUserId(
-                  event.target.value,
-                )
+              defaultValue={
+                selectedTask.userId ?? ""
               }
-              disabled={usersLoading}
-              className="w-full rounded-md border border-gray-300 px-3 py-2"
+              onChange={(event) => {
+                const userId = Number(
+                  event.target.value,
+                );
+
+                if (userId) {
+                  assignTaskMutation.mutate({
+                    taskId: selectedTask.id,
+                    userId,
+                  });
+                }
+              }}
+              disabled={
+                assignTaskMutation.isPending
+              }
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900"
             >
               <option value="">
                 Select a user
               </option>
 
-              {users?.map((user) => (
+              {users.map((user) => (
                 <option
                   key={user.id}
                   value={user.id}
@@ -843,26 +821,28 @@ export default function TaskBoard() {
               ))}
             </select>
           </div>
-
-          {assignTaskMutation.isError && (
-            <p
-              className="text-sm text-red-600"
-              role="alert"
-            >
-              Failed to assign task.
-            </p>
-          )}
-
-          <Button
-            onClick={handleAssignTask}
-            loading={
-              assignTaskMutation.isPending
-            }
-          >
-            Assign
-          </Button>
-        </div>
+        )}
       </Modal>
-    </>
+
+      <Modal
+        isOpen={isCreateProjectModalOpen}
+        onClose={() =>
+          setIsCreateProjectModalOpen(false)
+        }
+        title="Create Project"
+      >
+        <ProjectForm
+          onSubmit={(name, description) =>
+            createProjectMutation.mutate({
+              name,
+              description,
+            })
+          }
+          isSubmitting={
+            createProjectMutation.isPending
+          }
+        />
+      </Modal>
+    </main>
   );
 }

@@ -20,12 +20,16 @@ export async function addTask(
   title: string,
   description: string,
   dueDate?: string,
+  priority?: "LOW" | "MEDIUM" | "HIGH",
+  userId?: number,
   projectId?: number,
 ) {
   return await createTask({
     title,
     description,
     dueDate,
+    priority,
+    userId,
     projectId,
   });
 }
@@ -37,6 +41,7 @@ export async function editTask(
     description: string;
     status: "TODO" | "IN_PROGRESS" | "DONE";
     dueDate: string;
+    priority: "LOW" | "MEDIUM" | "HIGH";
     userId: number;
     projectId: number;
   }>,
@@ -48,7 +53,10 @@ export async function removeTask(id: number) {
   return await deleteTask(id);
 }
 
-export async function assignTask(id: number, userId: number) {
+export async function assignTask(
+  id: number,
+  userId: number,
+) {
   return await updateTask(id, { userId });
 }
 

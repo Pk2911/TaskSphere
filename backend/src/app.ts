@@ -10,6 +10,7 @@ import path from "path";
 import { errorHandler } from "./middleware/errorHandler.js";
 import taskRoutes from "./routes/taskRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import projectRoutes from "./routes/projectRoutes.js";
 
 const app = express();
 const PORT = 4000;
@@ -33,6 +34,8 @@ app.get(
 app.use("/", taskRoutes);
 
 app.use("/auth", authRoutes);
+
+app.use("/", projectRoutes);
 
 // The error handler MUST be the last middleware used in the pipeline
 app.use(errorHandler);

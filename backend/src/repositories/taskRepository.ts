@@ -14,13 +14,19 @@ export function createTask(data: {
   title: string;
   description: string;
   dueDate?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  userId?: number;
   projectId?: number;
 }) {
   return prisma.task.create({
     data: {
       title: data.title,
       description: data.description,
-      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+      dueDate: data.dueDate
+        ? new Date(data.dueDate)
+        : undefined,
+      priority: data.priority,
+      userId: data.userId,
       projectId: data.projectId,
     },
   });
@@ -33,6 +39,7 @@ export function updateTask(
     description?: string;
     status?: "TODO" | "IN_PROGRESS" | "DONE";
     dueDate?: string;
+    priority?: "LOW" | "MEDIUM" | "HIGH";
     userId?: number;
     projectId?: number;
   },
@@ -43,7 +50,10 @@ export function updateTask(
       title: data.title,
       description: data.description,
       status: data.status,
-      dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+      dueDate: data.dueDate
+        ? new Date(data.dueDate)
+        : undefined,
+      priority: data.priority,
       userId: data.userId,
       projectId: data.projectId,
     },
